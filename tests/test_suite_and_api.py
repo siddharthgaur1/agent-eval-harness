@@ -33,6 +33,22 @@ def test_adversarial_tasks_do_not_all_demand_completion():
     )
 
 
+def test_every_task_input_file_exists():
+    """A task pointing at a missing CSV is unrunnable against a real agent.
+
+    The mock never opens these files, so nothing else in the suite would notice
+    until someone pointed the harness at a live agent and lost the run.
+    """
+    from pathlib import Path
+
+    missing = [
+        (t.task_id, t.input["csv_path"])
+        for t in load_suite("suites/default.yaml").tasks
+        if t.input.get("csv_path") and not Path(t.input["csv_path"]).exists()
+    ]
+    assert not missing, f"tasks reference files that do not exist: {missing}"
+
+
 def test_duplicate_task_ids_are_rejected(tmp_path):
     path = tmp_path / "dupes.yaml"
     path.write_text("- task_id: a\n- task_id: a\n", encoding="utf-8")

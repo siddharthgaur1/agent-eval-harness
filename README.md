@@ -170,6 +170,19 @@ through the LangGraph callback handler. Running the full 16-task suite against i
 at 5 repeats costs real API spend; the numbers above are the reproducible ones,
 and I would rather publish a reproducible demo than an unreproducible headline.
 
+The datasets the suite points at are all in `sample_data/`, including the
+adversarial ones — `sample_data/generate.py` derives them from
+`customer_churn.csv` by changing exactly one thing each (all labels identical,
+zero rows, a column that leaks the target, malformed rows). One-variable
+differences are what make a score difference attributable: if
+`single_class_target` regresses and `churn_baseline` does not, the single-class
+label is the cause, because nothing else about the two files differs.
+
+The three LLM judges have never been run against the live API — their parsing,
+retry, backoff, persistence and evidence-filtering are covered by stubbed tests,
+but no real GPT-4o verdict has been recorded. Until that happens, treat the
+deterministic six as the gate and the three judges as directional.
+
 ---
 
 ## Setup
@@ -208,6 +221,11 @@ docker compose up
 # API       http://localhost:8000/docs
 # Dashboard http://localhost:8501
 ```
+
+Both services share one SQLite file through a named volume — the dashboard's
+whole job is to show what the API stored. Verified from a clean build: the API
+comes up healthy, `POST /evaluate` runs the 16-task suite in-container, and
+`GET /runs/{id}/report.html` renders.
 
 Or locally:
 
@@ -424,7 +442,7 @@ viewer.
 ## Tests
 
 ```bash
-pytest tests/ -v          # 81 tests, no API key needed
+pytest tests/ -v          # 85 tests, no API key needed
 ```
 
 Every OpenAI call is stubbed. Coverage worth naming:
@@ -442,7 +460,13 @@ Every OpenAI call is stubbed. Coverage worth naming:
 - The adapter: a fake LangGraph run produces a well-formed trajectory with
   contiguous indices, and an unrecognised state degrades to a thin trajectory
   rather than raising.
-- End to end: run three agent versions, assert the acceptance criteria hold.
+- The dashboard, executed headless via `streamlit.testing.v1.AppTest` — all three
+  views render against a real store with no exception, and every step a scorer
+  cites on a failing run is a real index into the trajectory being displayed. A
+  dashboard that imports cleanly but raises on render is broken exactly when you
+  need it.
+- Every task's `csv_path` exists on disk. The mock never opens those files, so
+  nothing else would catch a suite that cannot run against a live agent.
 
 ---
 

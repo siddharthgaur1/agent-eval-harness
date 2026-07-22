@@ -291,10 +291,6 @@ def _get(obj: Any, key: str, default: Any = None) -> Any:
 
 
 def _node_name(serialized: dict[str, Any] | None, kwargs: dict[str, Any]) -> str:
-    tags = kwargs.get("tags") or []
-    for tag in tags:
-        if isinstance(tag, str) and tag.startswith("graph:step:"):
-            continue
     name = kwargs.get("name") or (serialized or {}).get("name", "")
     # LangGraph emits internal chains too; only named nodes are interesting.
     return "" if name in {"", "LangGraph", "RunnableSequence", "__start__"} else str(name)

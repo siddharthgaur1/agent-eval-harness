@@ -13,7 +13,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from types import TracebackType
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from .schema import Step, StepType, TerminalState, Trajectory
 
@@ -180,8 +180,3 @@ def _truncate(value: Any, limit: int = 2000) -> Any:
         return value
     text = value if isinstance(value, str) else repr(value)
     return text if len(text) <= limit else text[:limit] + "…[truncated]"
-
-
-def steps_of(trajectory: Trajectory) -> Iterator[Step]:
-    """Convenience iterator, mostly for readability at call sites."""
-    yield from trajectory.steps

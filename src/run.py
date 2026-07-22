@@ -10,8 +10,10 @@ non-zero on a hard regression, which is how the GitHub Action gates a merge.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+import threading
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,7 +30,12 @@ from .scorers import score_trajectory
 from .scorers.base import ScoreResult
 from .suites.loader import load_suite
 from .suites.schema import Suite, TaskDef
-from .trace.schema import TerminalState, Trajectory
+from .trace.schema import Trajectory
+
+# Agents are told which variant to be through the environment, so two suite runs
+# in the same process would overwrite each other's version. Serialising them is
+# the honest fix: the parallelism that matters is inside a run, across tasks.
+_run_lock = threading.Lock()
 
 
 def run_suite(
@@ -47,25 +54,26 @@ def run_suite(
     store = store or Store()
     agent = resolve_agent(agent_spec)
 
-    # The agent reads its own version from the environment; the harness should not
-    # have to know how a given agent wants to be told which variant to be.
-    os.environ["AGENT_UNDER_TEST_VERSION"] = agent_version
-
     jobs = [(task, r) for task in suite.tasks for r in range(repeats)]
     task_runs: list[TaskRun] = []
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(_run_one, agent, task, repeat, include_llm, store): (task, repeat)
-            for task, repeat in jobs
-        }
-        for future in as_completed(futures):
-            task, repeat = futures[future]
-            try:
-                task_runs.append(future.result())
-            except Exception as exc:  # a crashed task is a data point, not a stop
-                traceback.print_exc()
-                task_runs.append(_crashed(task, repeat, exc))
+    with _run_lock:
+        # The agent reads its own version from the environment; the harness should
+        # not have to know how a given agent wants to be told which variant to be.
+        os.environ["AGENT_UNDER_TEST_VERSION"] = agent_version
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_run_one, agent, task, repeat, include_llm, store): (task, repeat)
+                for task, repeat in jobs
+            }
+            for future in as_completed(futures):
+                task, repeat = futures[future]
+                try:
+                    task_runs.append(future.result())
+                except Exception as exc:  # a crashed task is a data point, not a stop
+                    traceback.print_exc()
+                    task_runs.append(_crashed(task, repeat, exc))
 
     task_runs.sort(key=lambda tr: (tr.task_id, tr.repeat))
     agg = aggregate(task_runs)
@@ -84,7 +92,7 @@ def run_suite(
 
     settings.ensure_dirs()
     (settings.runs_dir / f"{run_id}.json").write_text(
-        __import__("json").dumps(record, indent=2, default=str), encoding="utf-8"
+        json.dumps(record, indent=2, default=str), encoding="utf-8"
     )
     return record, agg
 
