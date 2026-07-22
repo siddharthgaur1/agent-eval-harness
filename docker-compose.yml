@@ -1,0 +1,52 @@
+# API + dashboard, sharing one SQLite file through a named volume.
+#
+# Both services read the same DB, which is why the volume is shared rather than
+# each having its own: the dashboard's whole job is to show what the API stored.
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DB_PATH: /data/harness.db
+      RUNS_DIR: /data/runs
+      REPORTS_DIR: /data/reports
+      JUDGE_MODEL: ${JUDGE_MODEL:-gpt-4o}
+      REGRESSION_THRESHOLD: ${REGRESSION_THRESHOLD:-0.05}
+      REPEATS: ${REPEATS:-3}
+    volumes:
+      - harness-data:/data
+      - ./suites:/app/suites:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  dashboard:
+    build: .
+    command:
+      - streamlit
+      - run
+      - dashboard/app.py
+      - --server.port=8501
+      - --server.address=0.0.0.0
+      - --server.headless=true
+    ports:
+      - "8501:8501"
+    environment:
+      DB_PATH: /data/harness.db
+      RUNS_DIR: /data/runs
+      REPORTS_DIR: /data/reports
+    volumes:
+      - harness-data:/data
+      - ./suites:/app/suites:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  harness-data:

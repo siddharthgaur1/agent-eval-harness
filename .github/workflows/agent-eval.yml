@@ -1,0 +1,87 @@
+# Gates merges on trajectory-level regressions.
+#
+# The baseline is committed to the repo (baselines/main.json) rather than fetched
+# from a service: a CI check that depends on a running server fails open the day
+# the server is down, and a gate that fails open is not a gate.
+#
+# To refresh it after an intentional behaviour change:
+#   python -m src.run --suite suites/default.yaml --agent-version main --repeats 5
+#   cp data/runs/<run_id>.json baselines/main.json
+
+name: agent-eval
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "suites/**"
+      - "prompts/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run the golden suite against this PR
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # 5 repeats is the floor for a usable noise band. Fewer, and the
+          # detector cannot tell a regression from a bad afternoon.
+          REPEATS: "5"
+          WORKERS: "4"
+        run: |
+          python -m src.run \
+            --suite suites/default.yaml \
+            --agent mock \
+            --agent-version "pr-${{ github.event.pull_request.number }}" \
+            --report report.html
+          echo "RUN_ID=$(ls -t data/runs | head -1 | sed 's/.json//')" >> "$GITHUB_ENV"
+
+      - name: Compare against the committed baseline
+        id: compare
+        run: |
+          python -m src.compare_cli \
+            --baseline baselines/main.json \
+            --candidate "data/runs/${RUN_ID}.json" \
+            --markdown comment.md
+        continue-on-error: true
+
+      - name: Comment on the PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('comment.md')) return;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: fs.readFileSync('comment.md', 'utf8'),
+            });
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-eval-report
+          path: |
+            report.html
+            data/runs/
+
+      - name: Fail the check on a hard regression
+        if: steps.compare.outcome == 'failure'
+        run: |
+          echo "::error::Hard regression detected — see the PR comment."
+          exit 1

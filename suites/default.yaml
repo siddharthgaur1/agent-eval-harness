@@ -1,0 +1,241 @@
+# Golden task suite for autonomous-data-scientist.
+#
+# Three categories, and the category changes what "correct" means:
+#   happy_path    - normal work. Success is completing it well.
+#   adversarial   - broken or impossible input. Success is usually a clean stop
+#                   or an escalation, NOT a completed run. An agent that returns
+#                   a confident answer here is failing, not passing.
+#   budget_stress - designed to tempt the agent into a loop. Success is noticing.
+#
+# Tune `optimal_steps` from an observed good run, not from intuition — it is the
+# denominator of step_efficiency and a guess there makes the dimension noise.
+
+name: default
+
+tasks:
+  # ---------------------------------------------------------------- happy path
+  - task_id: churn_baseline
+    description: "Predict customer churn from customer_churn.csv"
+    category: happy_path
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Predict which customers will churn and tell me what drives it"
+    expected_tools: [plan, clean, eda, engineer_features, select_model, evaluate, report]
+    optimal_steps: 12
+    budget: {max_tokens: 60000, max_cost_usd: 1.50, max_seconds: 300}
+    success_assertions:
+      - terminal_state: completed
+      - artifact_exists: model.pkl
+      - metric_present: roc_auc
+    weight: 1.5
+
+  - task_id: churn_with_tuning
+    description: "Predict churn and tune the chosen model for the best ROC-AUC"
+    category: happy_path
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Predict churn, then tune the model to maximise ROC-AUC"
+    expected_tools: [plan, clean, eda, engineer_features, select_model, tune, evaluate, report]
+    optimal_steps: 16
+    budget: {max_tokens: 90000, max_cost_usd: 2.50, max_seconds: 480}
+    success_assertions:
+      - terminal_state: completed
+      - metric_present: roc_auc
+      - tool_called: tune
+    weight: 1.0
+
+  - task_id: sales_regression
+    description: "Forecast revenue per transaction from sales_data.csv"
+    category: happy_path
+    input:
+      csv_path: sample_data/sales_data.csv
+      goal: "Predict revenue per transaction and explain the main drivers"
+    expected_tools: [plan, clean, eda, engineer_features, select_model, evaluate, report]
+    optimal_steps: 12
+    budget: {max_tokens: 60000, max_cost_usd: 1.50, max_seconds: 300}
+    success_assertions:
+      - terminal_state: completed
+      - artifact_exists: model.pkl
+    weight: 1.0
+
+  - task_id: stock_timeseries
+    description: "Model the closing price series in stock_prices.csv"
+    category: happy_path
+    input:
+      csv_path: sample_data/stock_prices.csv
+      goal: "Model the closing price over time and report holdout error"
+    expected_tools: [plan, clean, eda, engineer_features, select_model, evaluate, report]
+    optimal_steps: 13
+    budget: {max_tokens: 70000, max_cost_usd: 1.80, max_seconds: 360}
+    success_assertions:
+      - terminal_state: completed
+      - metric_present: rmse
+    weight: 1.0
+
+  - task_id: eda_only
+    description: "Explore customer_churn.csv without training anything"
+    category: happy_path
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Just explore this dataset and describe what you find. Do not train a model."
+    expected_tools: [plan, clean, eda, report]
+    forbidden_tools: [select_model, tune]
+    optimal_steps: 6
+    budget: {max_tokens: 25000, max_cost_usd: 0.60, max_seconds: 150}
+    success_assertions:
+      - terminal_state: completed
+      - tool_not_called: select_model
+    weight: 1.0
+
+  - task_id: cleaning_heavy
+    description: "Handle a dataset with nulls and mixed types before modelling"
+    category: happy_path
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "This data is messy. Clean it thoroughly, then predict churn."
+    expected_tools: [plan, clean, eda, engineer_features, select_model, evaluate, report]
+    optimal_steps: 14
+    budget: {max_tokens: 70000, max_cost_usd: 1.80, max_seconds: 360}
+    success_assertions:
+      - terminal_state: completed
+      - tool_called: clean
+    weight: 1.0
+
+  - task_id: explain_drivers
+    description: "Train, then explain which features drive the prediction"
+    category: happy_path
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Predict churn and rank the features by how much they matter"
+    expected_tools: [plan, clean, eda, engineer_features, select_model, evaluate, narrate, report]
+    optimal_steps: 15
+    budget: {max_tokens: 80000, max_cost_usd: 2.00, max_seconds: 420}
+    success_assertions:
+      - terminal_state: completed
+      - output_contains: "driver"
+    weight: 1.0
+
+  # --------------------------------------------------------------- adversarial
+  - task_id: missing_target_column
+    description: "Ask for a target column that does not exist in the file"
+    category: adversarial
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Predict the `lifetime_value` column"
+    expected_tools: [plan, clean, eda]
+    forbidden_tools: [tune]
+    optimal_steps: 5
+    budget: {max_tokens: 25000, max_cost_usd: 0.60, max_seconds: 180}
+    acceptable_terminal_states: [escalated, failed]
+    success_assertions:
+      - tool_not_called: tune
+    weight: 1.5
+
+  - task_id: empty_dataset
+    description: "A CSV with headers and no rows"
+    category: adversarial
+    input:
+      csv_path: sample_data/empty.csv
+      goal: "Predict churn from this data"
+    expected_tools: [plan, clean]
+    optimal_steps: 3
+    budget: {max_tokens: 15000, max_cost_usd: 0.40, max_seconds: 120}
+    acceptable_terminal_states: [escalated, failed]
+    success_assertions:
+      - tool_not_called: select_model
+    weight: 1.0
+
+  - task_id: single_class_target
+    description: "Every row has the same label — nothing to classify"
+    category: adversarial
+    input:
+      csv_path: sample_data/single_class.csv
+      goal: "Build a classifier for the churn column"
+    expected_tools: [plan, clean, eda]
+    optimal_steps: 5
+    budget: {max_tokens: 25000, max_cost_usd: 0.60, max_seconds: 180}
+    acceptable_terminal_states: [escalated, failed]
+    success_assertions:
+      - tool_not_called: tune
+    weight: 1.5
+
+  - task_id: impossible_goal
+    description: "Ask for a prediction the data cannot support"
+    category: adversarial
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Predict each customer's exact date of death from this file"
+    expected_tools: [plan, eda]
+    optimal_steps: 4
+    budget: {max_tokens: 20000, max_cost_usd: 0.50, max_seconds: 150}
+    acceptable_terminal_states: [escalated, failed]
+    success_assertions:
+      - tool_not_called: select_model
+    weight: 1.5
+
+  - task_id: leaky_feature
+    description: "A column that trivially leaks the target"
+    category: adversarial
+    input:
+      csv_path: sample_data/leaky_churn.csv
+      goal: "Predict churn. Watch out for anything that leaks the answer."
+    expected_tools: [plan, clean, eda, engineer_features, select_model, evaluate, report]
+    optimal_steps: 13
+    budget: {max_tokens: 70000, max_cost_usd: 1.80, max_seconds: 360}
+    acceptable_terminal_states: [completed, escalated]
+    success_assertions:
+      - output_contains: "leak"
+    weight: 1.5
+
+  - task_id: ambiguous_goal
+    description: "A goal too vague to act on without asking"
+    category: adversarial
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Do something useful with this"
+    expected_tools: [plan, eda]
+    optimal_steps: 4
+    budget: {max_tokens: 20000, max_cost_usd: 0.50, max_seconds: 150}
+    acceptable_terminal_states: [escalated, completed]
+    weight: 1.0
+
+  # -------------------------------------------------------------- budget stress
+  - task_id: tight_token_budget
+    description: "A full modelling task under a budget that only just fits"
+    category: budget_stress
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Predict churn. Keep it cheap."
+    expected_tools: [plan, clean, eda, select_model, evaluate]
+    optimal_steps: 8
+    budget: {max_tokens: 20000, max_cost_usd: 0.50, max_seconds: 180}
+    acceptable_terminal_states: [completed, escalated]
+    success_assertions:
+      - terminal_state: completed
+    weight: 1.5
+
+  - task_id: retry_bait
+    description: "A tool that fails the first time and tempts an infinite retry"
+    category: budget_stress
+    input:
+      csv_path: sample_data/corrupt_rows.csv
+      goal: "Predict churn. Some rows are corrupt; work around them."
+    expected_tools: [plan, clean, eda, engineer_features, select_model, evaluate]
+    optimal_steps: 12
+    budget: {max_tokens: 60000, max_cost_usd: 1.50, max_seconds: 300}
+    acceptable_terminal_states: [completed, escalated]
+    weight: 1.5
+
+  - task_id: unbounded_exploration
+    description: "An open-ended goal with no natural stopping point"
+    category: budget_stress
+    input:
+      csv_path: sample_data/customer_churn.csv
+      goal: "Explore every possible relationship in this dataset exhaustively"
+    expected_tools: [plan, clean, eda, report]
+    optimal_steps: 8
+    budget: {max_tokens: 40000, max_cost_usd: 1.00, max_seconds: 240}
+    acceptable_terminal_states: [completed, escalated]
+    success_assertions:
+      - terminal_state: completed
+    weight: 1.5
