@@ -1,14 +1,72 @@
 # Agent Evaluation Harness
 
-Evaluates **multi-step agent trajectories**, not prompt/response pairs. Given a
-recorded agent run, it scores whether the agent chose the right tools, in the
-right order, recovered from failures, stayed within budget, and actually finished
-the task — then detects regressions when the prompts, model, or graph structure
-change.
+**Catches agent regressions that output-level evals cannot see — by scoring the whole trajectory, not the final answer.**
 
-Every score cites the exact step indices it is based on. A dimension that drops
-without naming the steps responsible is a number nobody can act on, so the schema
-rejects it.
+[![Live demo](https://img.shields.io/badge/live%20demo-not%20yet%20deployed-lightgrey)](#)
+[![tests](https://github.com/siddharthgaur1/agent-eval-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/siddharthgaur1/agent-eval-harness/actions/workflows/ci.yml)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Runs with no API key](https://img.shields.io/badge/runs%20with-no%20API%20key-brightgreen)](#run-with-zero-api-keys)
+
+> **Live demo:** _not yet deployed_ — see [Deploying the demo](#deploying-the-demo).
+> The dashboard runs locally with **no API key at all**; the screenshot below is that
+> local run, unedited.
+
+![The harness detecting a hard regression between two agent versions](assets/hero-regression-diff.png)
+
+*v1 vs v2 of the built-in mock agent. `loop_detection` fell 1.000 → 0.156 and
+`step_efficiency` 0.973 → 0.460, both far outside their measured noise bands, so
+the run is called a hard regression. Every number here was computed on the spot by
+the six deterministic scorers — no LLM, no key, nothing replayed from a fixture.*
+
+---
+
+## Problem → Approach → Result
+
+**Problem.** Agent evals overwhelmingly score the final answer. But an agent's
+output is the last thing it says, and everything expensive — the wrong tool, the
+40-retry loop, the invented column, the metric no tool ever produced — happens
+before that and leaves no trace in the text. A prompt change can quietly double an
+agent's tool calls while every output-level score stays flat.
+
+**Approach.** Make the *trajectory* the unit of evaluation. Agents emit a
+`Trajectory` (steps, tool calls, budgets, terminal state) via LangGraph callbacks,
+a `@record_step` decorator, or plain JSON import. Nine scorers grade it across six
+dimensions — six of them deterministic and key-free, three LLM judges for the
+things that need reading comprehension. Every score must cite the step indices it
+is based on or the schema rejects it. Repeats give each dimension a measured noise
+band, and a drop only counts as a regression if it clears that band.
+
+**Result.** A CI gate that fails a PR on a real behavioural regression instead of
+on run-to-run noise. See [Real numbers](#real-numbers) for measured figures and
+[Honesty about these numbers](#honesty-about-these-numbers) for what they do and
+do not establish.
+
+---
+
+## Run with zero API keys
+
+The deterministic half of the harness needs no key, no network, and no account:
+
+```bash
+git clone https://github.com/siddharthgaur1/agent-eval-harness
+cd agent-eval-harness
+pip install -r requirements.txt
+
+python -m src.run --no-llm --repeats 1        # scores the 16-task suite
+streamlit run dashboard/app.py                 # dashboard on :8501
+```
+
+The dashboard seeds itself on first boot by running the mock agent's v1 and v2
+through the deterministic scorers, so the side-by-side diff above has something
+real to show the moment it opens. Nothing is pre-recorded.
+
+**Bring your own free key** (optional — unlocks the three LLM judges):
+
+```bash
+cp .env.example .env      # then set OPENAI_API_KEY
+python -m src.run --repeats 5 --report report.html
+```
 
 ---
 
@@ -40,6 +98,38 @@ agent did justify this answer?* You need both. This repo is the second one.
 ---
 
 ## Architecture
+
+```mermaid
+flowchart TD
+    A1[LangGraph agent] -->|callbacks| T
+    A2[any Python agent] -->|@record_step| T
+    A3[someone else's agent] -->|JSON import| T
+
+    T["<b>Trajectory</b><br/>steps[] · totals · terminal_state<br/><i>the only contract</i>"]
+
+    T --> D["6 deterministic scorers<br/><i>no API key</i>"]
+    T --> J["3 LLM judges<br/><i>needs OPENAI_API_KEY</i>"]
+
+    D --> AGG[Aggregate<br/>mean ± stdev per dimension]
+    J --> AGG
+
+    AGG --> STORE[(SQLite store)]
+    STORE --> REG{Regression check<br/>delta vs measured noise band}
+    REG -->|clears the band| FAIL[hard regression → CI exit 1]
+    REG -->|within the band| PASS[within noise → pass]
+
+    STORE --> UI[Streamlit dashboard]
+    STORE --> HTML[HTML report]
+    STORE --> API[FastAPI service]
+
+    style T fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    style D fill:#e8f5e9,stroke:#43a047
+    style J fill:#fff8e1,stroke:#fbc02d
+    style FAIL fill:#ffebee,stroke:#e53935
+```
+
+<details>
+<summary>Same diagram as ASCII (fallback for renderers without Mermaid)</summary>
 
 ```
    agent under test                     harness
@@ -83,6 +173,8 @@ agent did justify this answer?* You need both. This repo is the second one.
                                 ▼
                      exit 1 → GitHub Action fails the PR
 ```
+
+</details>
 
 The `Trajectory` in the middle is the load-bearing decision. Adapters write it,
 scorers read it, and nothing downstream knows or cares which framework produced
@@ -507,3 +599,96 @@ proves they work.*
   labels, or with each other across reruns. Until that exists the three LLM
   dimensions are directional, and the deterministic six are the ones I would gate
   a merge on.
+
+---
+
+## Configuration
+
+Every variable is optional. With none of them set the harness runs the six
+deterministic scorers on defaults — that is the `--no-llm` path, and it needs no
+account anywhere.
+
+| Variable | Required | Default | How to get it free |
+| --- | --- | --- | --- |
+| `OPENAI_API_KEY` | No — only for the 3 LLM judges | _(empty)_ | [platform.openai.com](https://platform.openai.com/api-keys) — **paid**. Without it use `--no-llm`; nothing else degrades. |
+| `JUDGE_MODEL` | No | `gpt-4o` | — |
+| `CHEAP_MODEL` | No | `gpt-4o-mini` | — |
+| `JUDGE_MAX_RETRIES` | No | `3` | — |
+| `DB_PATH` | No | `data/harness.db` | — |
+| `RUNS_DIR` | No | `data/runs` | — |
+| `REPORTS_DIR` | No | `data/reports` | — |
+| `REGRESSION_THRESHOLD` | No | `0.05` | Per-dimension drop before it counts. Lower = more sensitive, more false alarms. |
+| `OVERALL_THRESHOLD` | No | `0.03` | Same, for the weighted overall score. |
+| `DRIFT_WINDOW` | No | `5` | Runs the slow-drift check looks back over. |
+| `DRIFT_THRESHOLD` | No | `0.08` | Cumulative drop across that window that counts as drift. |
+| `REPEATS` | No | `3` | Repeats per task. 1 gives no variance estimate and no noise band. |
+| `WORKERS` | No | `4` | — |
+| `LOOP_REPEAT_LIMIT` | No | `3` | Identical tool+input calls at or above this are flagged as a loop. |
+| `AGENT_UNDER_TEST_PATH` | No | `../autonomous-data-scientist` | Only read by `src/agents_under_test/ads.py`. |
+
+Settings are validated at import (`src/config.py`), so a bad threshold fails at
+startup rather than halfway through a suite.
+
+---
+
+## Project structure
+
+```
+agent-eval-harness/
+├── src/
+│   ├── trace/            # Trajectory schema + the three adapters that produce it
+│   │   ├── schema.py     #   the load-bearing contract
+│   │   ├── recorder.py   #   @record_step decorator for arbitrary Python agents
+│   │   ├── langgraph.py  #   LangGraph callback handler
+│   │   └── importer.py   #   JSON import for agents you do not control
+│   ├── scorers/
+│   │   ├── deterministic.py  # the six key-free scorers
+│   │   └── judge.py          # the three LLM judges
+│   ├── compare/regression.py # noise bands, hard regressions, slow drift
+│   ├── suites/           # YAML suite loading + schema
+│   ├── persistence/      # SQLite store (parameterized queries only)
+│   ├── report/html.py    # standalone HTML report
+│   ├── api/app.py        # FastAPI service
+│   └── run.py            # suite runner + CLI
+├── dashboard/app.py      # Streamlit: scorecard, trajectory viewer, diff
+├── suites/default.yaml   # 16 tasks: happy path, adversarial, budget stress
+├── baselines/main.json   # committed baseline the CI gate compares against
+├── sample_data/          # CSVs the suite's tasks point at
+├── assets/               # README screenshots
+└── tests/                # 89 tests, no API key required
+```
+
+---
+
+## Deploying the demo
+
+Target: **Hugging Face Spaces, free CPU tier** — no credit card, and the dashboard
+is pure Streamlit reading a local SQLite file, so the free tier's constraints
+(ephemeral disk, cold starts) cost nothing here. The database is rebuilt on boot by
+`_seed_if_empty()` in under a second, which also means the demo can never drift
+away from what the current code actually computes.
+
+```bash
+# one-time, after creating a Space with SDK=streamlit, app_file=dashboard/app.py
+git remote add space https://huggingface.co/spaces/<user>/agent-eval-harness
+git push space main
+```
+
+Not deployed yet — the badge and the link at the top go live with it.
+
+---
+
+## Security
+
+Full threat model, what is mitigated and what is not: **[SECURITY.md](SECURITY.md)**.
+
+The short version:
+
+- `gitleaks` over the full git history: **0 findings**. No `.env` has ever been tracked.
+- `pip-audit`: **no known vulnerabilities**, every dependency pinned to `==`.
+- All SQL is parameterized; `yaml.safe_load` only; no `exec`/`eval`/`pickle` anywhere.
+- `POST /evaluate` restricts `suite` to `.yaml` files under `suites/` — without that
+  it was an unauthenticated arbitrary-file-read probe. Regression-tested.
+- **Not mitigated:** no authentication, no rate limiting, and LLM judges are
+  susceptible to prompt injection from the trajectories they read. The deterministic
+  six are not, which is a large part of why the harness weights both.
