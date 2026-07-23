@@ -17,6 +17,10 @@ COPY pytest.ini ./
 
 RUN mkdir -p data/runs data/reports
 
+# Non-root: the harness reads suites/ and writes under data/, nothing else.
+RUN useradd --create-home --uid 10001 harness && chown -R harness:harness /app
+USER harness
+
 EXPOSE 8000 8501
 
 CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
