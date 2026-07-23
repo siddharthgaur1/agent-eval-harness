@@ -47,6 +47,35 @@ def get_store() -> Store:
 
 store = get_store()
 
+
+@st.cache_resource
+def _seed_if_empty() -> bool:
+    """Give a fresh deployment something to show.
+
+    These are not canned fixtures — the mock agent and the six deterministic
+    scorers both run for real, here, on boot. No API key is involved, so the
+    numbers on screen are genuinely computed rather than replayed.
+    """
+    if store.list_runs(limit=1):
+        return False
+    from src.run import run_suite
+    from src.suites.loader import load_suite
+
+    for version in ("v1", "v2"):
+        run_suite(
+            load_suite("suites/default.yaml"),
+            "mock",
+            version,
+            repeats=2,
+            include_llm=False,
+            store=store,
+        )
+    return True
+
+
+if _seed_if_empty():
+    st.toast("Seeded with a live deterministic run of the mock agent.")
+
 st.sidebar.title("Agent Eval Harness")
 view = st.sidebar.radio("View", ["Run scorecard", "Trajectory viewer", "Side-by-side diff"])
 
