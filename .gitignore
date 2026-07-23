@@ -1,9 +1,16 @@
 .env
-data/
+data/*
 *.db
+# Exception: a pre-seeded database (a real deterministic run of the mock agent's
+# v1 and v2) is committed so the hosted dashboard shows the side-by-side
+# regression on first load. On-boot seeding does not complete reliably on
+# Streamlit Community Cloud, so the data ships in the repo instead.
+!data/harness.db
 # Generated reports. Committed baselines under baselines/ are deliberately kept.
 report.html
 comment.md
+.serena/
+.ipynb_checkpoints/
 
 __pycache__/
 *.py[cod]
