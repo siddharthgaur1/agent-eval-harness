@@ -2,15 +2,15 @@
 
 **Catches agent regressions that output-level evals cannot see — by scoring the whole trajectory, not the final answer.**
 
-[![Live demo](https://img.shields.io/badge/live%20demo-not%20yet%20deployed-lightgrey)](#)
+[![Live demo](https://img.shields.io/badge/live%20demo-online-brightgreen)](https://siddharthgaur1-siddharthagent-eval-harness-dashboardapp-rppgf9.streamlit.app/)
 [![tests](https://github.com/siddharthgaur1/agent-eval-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/siddharthgaur1/agent-eval-harness/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Runs with no API key](https://img.shields.io/badge/runs%20with-no%20API%20key-brightgreen)](#run-with-zero-api-keys)
 
-> **Live demo:** _not yet deployed_ — see [Deploying the demo](#deploying-the-demo).
-> The dashboard runs locally with **no API key at all**; the screenshot below is that
-> local run, unedited.
+> **▶ Live demo: https://siddharthgaur1-siddharthagent-eval-harness-dashboardapp-rppgf9.streamlit.app/**
+> — clickable with **no API key**, showing a real v1-vs-v2 regression seeded from a
+> deterministic run of the mock agent. (First load may take ~30s if the app is asleep.)
 
 ![The harness detecting a hard regression between two agent versions](assets/hero-regression-diff.png)
 
