@@ -8,11 +8,12 @@ and an HTTP client should not be holding a socket open through it.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..compare.regression import compare_runs, format_report
 from ..config import settings
@@ -30,6 +31,11 @@ app = FastAPI(
 
 store = Store()
 
+# Suite files the API is allowed to read. The CLI may load a suite from anywhere;
+# the HTTP surface may not, or `suite: "../../.ssh/id_rsa"` turns POST /evaluate
+# into an arbitrary-file-read probe (YAML parse errors quote the file back).
+SUITES_ROOT = Path("suites").resolve()
+
 # In-process job table. A single-node harness with a handful of concurrent suite
 # runs does not need a broker; if this ever outgrows one process, the state to
 # move is this dict and nothing else.
@@ -44,6 +50,17 @@ class EvaluateRequest(BaseModel):
     include_llm: bool = True
     baseline_run_id: str | None = None
     set_baseline: bool = False
+
+    @field_validator("suite")
+    @classmethod
+    def _inside_suites_root(cls, v: str) -> str:
+        resolved = Path(v).resolve()
+        if not resolved.is_relative_to(SUITES_ROOT) or resolved.suffix not in {
+            ".yaml",
+            ".yml",
+        }:
+            raise ValueError("suite must be a .yaml file under suites/")
+        return v
 
 
 class EvaluateResponse(BaseModel):

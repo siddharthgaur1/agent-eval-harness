@@ -174,6 +174,20 @@ def test_ingest_rejects_a_malformed_trajectory(client):
     assert client.post("/trajectories", json={"task_id": "no run id"}).status_code == 422
 
 
+@pytest.mark.parametrize(
+    "suite",
+    [
+        "../../../etc/passwd",
+        "/etc/passwd",
+        "suites/../src/config.py",
+        "suites/default.txt",
+    ],
+)
+def test_evaluate_refuses_suites_outside_the_suites_directory(client, suite):
+    """Otherwise POST /evaluate is an unauthenticated arbitrary-file-read probe."""
+    assert client.post("/evaluate", json={"suite": suite}).status_code == 422
+
+
 def test_unknown_ids_are_404(client):
     assert client.get("/trajectories/nope").status_code == 404
     assert client.get("/runs/nope").status_code == 404
