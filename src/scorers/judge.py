@@ -42,7 +42,9 @@ def _client():
     """Lazily construct the OpenAI client so imports stay cheap and key-free."""
     from openai import OpenAI
 
-    return OpenAI(api_key=settings.require_openai())
+    # Explicit timeout: the SDK default is 10 minutes, long enough for one wedged
+    # judge call to stall a whole suite run behind it.
+    return OpenAI(api_key=settings.require_openai(), timeout=60.0, max_retries=0)
 
 
 def call_judge(
